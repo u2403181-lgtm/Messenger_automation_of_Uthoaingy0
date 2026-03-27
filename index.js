@@ -8,117 +8,114 @@ const app = express();
 app.use(express.json());
 
 const { 
-    GROQ_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, 
+    GEMINI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY, 
     PAGE_ACCESS_TOKEN, VERIFY_TOKEN, APPS_SCRIPT_URL 
 } = process.env;
 
-const CONTACT_JSON_PATH = path.join(__dirname, "ContactData.json");
-const GRATING_JSON_PATH = path.join(__dirname, "Grating.json");
+// ১. ফাইল ক্যাশিং (Lightweight Search এর জন্য)
+const officeData = JSON.parse(fs.readFileSync(path.join(__dirname, "ContactData.json"), "utf8"));
+const greetingData = JSON.parse(fs.readFileSync(path.join(__dirname, "Grating.json"), "utf8"));
 
-function readLocalJSON(filePath) {
-    try {
-        if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, "utf8"));
-    } catch (e) { return null; }
+// ২. ইন-মেমোরি অফিস সার্চ (সবচেয়ে দ্রুত পদ্ধতি)
+function findOffice(location) {
+    if (!location) return null;
+    const query = location.toLowerCase();
+    return officeData.find(o => 
+        (o.city && o.city.toLowerCase().includes(query)) || 
+        (o.address && o.address.toLowerCase().includes(query))
+    );
+}
+
+// ৩. মাল্টি-মডেল এআই ইঞ্জিন
+async function askAI(userMsg) {
+    const prompt = `Task: Extract data and intent from: "${userMsg}".
+    Return ONLY JSON:
+    {
+      "intent": "info_sharing" | "qna",
+      "data": {"name": "..", "phone": "..", "location": ".."},
+      "answer": "Bengali response or UNKNOWN"
+    }`;
+
+    // মডেল লিস্ট (প্রাইমারি থেকে ফলব্যাক)
+    const configs = [
+        { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_API_KEY}`, type: 'gemini' },
+        { url: "https://api.groq.com/openai/v1/chat/completions", type: 'groq', key: GROQ_API_KEY, model: "llama-3.3-70b-versatile" },
+        { url: "https://api.deepseek.com/v1/chat/completions", type: 'deepseek', key: DEEPSEEK_API_KEY, model: "deepseek-chat" }
+    ];
+
+    for (const config of configs) {
+        if (!config.key && config.type !== 'gemini') continue;
+        try {
+            let res;
+            if (config.type === 'gemini') {
+                res = await axios.post(config.url, { contents: [{ parts: [{ text: prompt }] }] });
+                const raw = res.data.candidates[0].content.parts[0].text;
+                return JSON.parse(raw.match(/\{[\s\S]*\}/)[0]);
+            } else {
+                res = await axios.post(config.url, {
+                    model: config.model,
+                    messages: [{ role: "user", content: prompt }]
+                }, { headers: { Authorization: `Bearer ${config.key}` } });
+                return JSON.parse(res.data.choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+            }
+        } catch (e) { console.error(`${config.type} failed, trying next...`); }
+    }
     return null;
 }
 
-// --- AI ENGINE: Multi-Model with JSON Extraction ---
-async function getAIResponse(userMsg) {
-    const systemPrompt = `You are a Quantum Method Assistant. 
-    Analyze the message and return ONLY a JSON object:
-    {
-      "intent": "info_sharing" | "qna" | "greeting" | "problem_desc",
-      "extracted_data": {"name": null, "phone": null, "location": null},
-      "answer": "Your Bengali response"
-    }
-    Rules: 
-    1. If user gives name/phone/location, intent is "info_sharing".
-    2. If user describes a problem, intent is "problem_desc".
-    3. If unknown question, set answer to "UNKNOWN".`;
-
-    const models = ["gemini-1.5-flash", "gemini-2.0-flash"]; // Primary models
-
-    for (const model of models) {
-        try {
-            const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
-                contents: [{ parts: [{ text: `${systemPrompt}\n\nUser: ${userMsg}` }] }]
-            });
-            const rawText = res.data.candidates[0].content.parts[0].text;
-            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-            if (jsonMatch) return JSON.parse(jsonMatch[0]);
-        } catch (e) { console.error(`${model} failed...`); }
-    }
-    return { intent: "qna", answer: "দুঃখিত, এআই সার্ভার কাজ করছে না।" };
-}
-
-// --- Webhook processing ---
+// ৪. মেইন মেসেজ প্রসেসিং
 app.post("/webhook", async (req, res) => {
-    res.status(200).send("EVENT_RECEIVED");
+    res.sendStatus(200);
     const event = req.body.entry?.[0]?.messaging?.[0];
-    const senderId = event?.sender?.id;
-    const userMsg = event?.message?.text;
+    if (!event?.message?.text) return;
 
-    if (!userMsg || !senderId) return;
+    const senderId = event.sender.id;
+    const userMsg = event.message.text;
 
-    // ১. কাস্টম গ্রিটিং চেক (Grating.json)
-    const greetings = readLocalJSON(GRATING_JSON_PATH);
-    const matched = greetings?.find(g => 
+    // ক. লোকাল গ্রিটিং চেক (খুব দ্রুত)
+    const greet = greetingData.find(g => 
         userMsg.toLowerCase().includes(g.englishGreeting?.toLowerCase()) || 
         userMsg.includes(g.banglaGreeting)
     );
+    if (greet) return sendFB(senderId, `${greet.banglaReply}\n\nঅনুগ্রহ করে আপনার নাম, ফোন নম্বর এবং ঠিকানা দিন।`);
 
-    if (matched) {
-        return await sendFBMessage(senderId, `${matched.banglaReply}\n\nWelcome! I am your Quantum Method Assistant. Please share your full name, phone number, and location.`);
-    }
+    // খ. AI এনালাইসিস
+    const ai = await askAI(userMsg);
+    if (!ai) return;
 
-    // ২. AI এনালাইসিস
-    const ai = await getAIResponse(userMsg);
-
-    // ৩. ডাটা কালেকশন লজিক
+    // গ. ডাটা সেভ এবং অফিস সার্চ
     if (ai.intent === "info_sharing") {
-        const { name, phone, location } = ai.extracted_data;
-
-        // ভ্যালিডেশন: নাম বা ফোন না থাকলে সতর্কবার্তা
-        if (!name || !phone || name === "null" || phone === "null") {
-            return await sendFBMessage(senderId, "আপনার পূর্ণ নাম এবং ফোন নম্বর না দিলে আমাদের প্রতিনিধি যোগাযোগ করতে পারবে না। অনুগ্রহ করে সঠিক তথ্য দিন।");
+        const { name, phone, location } = ai.data;
+        
+        if (!name || !phone || name === ".." || phone === "..") {
+            return sendFB(senderId, "নাম এবং ফোন নম্বর ছাড়া আমরা আপনার সাথে যোগাযোগ করতে পারব না। অনুগ্রহ করে সঠিক তথ্য দিন।");
         }
 
-        // গুগল শিটে ডাটা পাঠানো (Apps Script-এ শুধুমাত্র entry)
-        await axios.post(APPS_SCRIPT_URL, {
-            action: "appendRow",
-            sheetName: "Sheet1",
-            rowData: [name, phone, location, ""]
-        });
+        // গুগল শিটে ডাটা এন্ট্রি (Background)
+        axios.post(APPS_SCRIPT_URL, { action: "appendRow", sheetName: "Sheet1", rowData: [name, phone, location, ""] }).catch(() => {});
 
-        // অফিস লোকেশন খোঁজা (ContactData.json)
-        const contactData = readLocalJSON(CONTACT_JSON_PATH);
-        const office = contactData?.find(o => location && (o.address.includes(location) || o.city.includes(location)));
+        const office = findOffice(location);
+        const reply = office 
+            ? `নিকটস্থ অফিস: ${office.name}\nঠিকানা: ${office.address}\nফোন: ${office.phone1}` 
+            : "আপনার লোকেশনে অফিস পাওয়া যায়নি, তবে প্রতিনিধি যোগাযোগ করবেন।";
         
-        let officeMsg = office ? `নিকটস্থ অফিস: ${office.name}\nঠিকানা: ${office.address}\nফোন: ${office.phone1}` : "আপনার লোকেশনে কোনো অফিস পাওয়া যায়নি।";
-        return await sendFBMessage(senderId, `${officeMsg}\n\nএবার আপনার সমস্যার কথা সংক্ষেপে লিখুন।`);
+        return sendFB(senderId, `${reply}\n\nএবার আপনার সমস্যাটি সংক্ষেপে লিখুন।`);
     }
 
-    // ৪. প্রবলেম ডেসক্রিপশন আপডেট বা সাধারণ প্রশ্নোত্তর
+    // ঘ. অজানা প্রশ্ন হ্যান্ডলিং
     if (ai.answer === "UNKNOWN") {
-        await axios.post(APPS_SCRIPT_URL, {
-            action: "appendRow",
-            sheetName: "UnknownQuestions",
-            rowData: [new Date().toLocaleString(), userMsg]
-        });
-        await sendFBMessage(senderId, "দুঃখিত, আমি এই উত্তরটি জানি না। এটি রেকর্ড করা হয়েছে।");
+        axios.post(APPS_SCRIPT_URL, { action: "appendRow", sheetName: "UnknownQuestions", rowData: [new Date().toLocaleString(), userMsg] }).catch(() => {});
+        sendFB(senderId, "দুঃখিত, আমি এটি জানি না। এটি রেকর্ড করা হয়েছে।");
     } else {
-        await sendFBMessage(senderId, ai.answer);
+        sendFB(senderId, ai.answer);
     }
 });
 
-// --- Facebook API Helpers ---
-async function sendFBMessage(id, text) {
-    try {
-        await axios.post(`https://graph.facebook.com/v19.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-            recipient: { id },
-            message: { text }
-        });
-    } catch (e) { console.error("Send Error"); }
+// ৫. হেল্পার ফাংশন
+async function sendFB(id, text) {
+    axios.post(`https://graph.facebook.com/v19.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+        recipient: { id }, message: { text }
+    }).catch(() => {});
 }
 
 app.get("/webhook", (req, res) => {
@@ -126,5 +123,4 @@ app.get("/webhook", (req, res) => {
     else res.sendStatus(403);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Bot is live on port ${PORT}`));
+app.listen(process.env.PORT || 3000, () => console.log("🚀 Quantum Bot Live!"));
