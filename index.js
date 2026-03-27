@@ -51,7 +51,7 @@ async function askAI(text) {
     - For general Q&A, answer in Bengali. If you don't know, return answer: "UNKNOWN".
     Return ONLY JSON: {"intent": "...", "data": {"name": "..", "phone": "..", "location": ".."}, "answer": ".."}`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/Gemini_1.5_Pro:generateContent?key=${process.env.GEMINI_API_KEY}`;
     try {
         const res = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
         const cleanJson = res.data.candidates[0].content.parts[0].text.replace(/```json|```/g, "");
