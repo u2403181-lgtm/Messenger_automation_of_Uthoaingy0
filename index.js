@@ -92,7 +92,7 @@ app.post("/webhook", async (req, res) => {
         }
 
         // গুগল শিটে ডাটা এন্ট্রি (Background)
-        axios.post(APPS_SCRIPT_URL, { action: "appendRow", sheetName: "Sheet1", rowData: [name, phone, location, ""] }).catch(() => {});
+        axios.post(APPS_SCRIPT_URL, { action: "appendRow", sheetName: "UserData", rowData: [name, phone, location, ""] }).catch(() => {});
 
         const office = findOffice(location);
         const reply = office 
@@ -104,7 +104,7 @@ app.post("/webhook", async (req, res) => {
 
     // ঘ. অজানা প্রশ্ন হ্যান্ডলিং
     if (ai.answer === "UNKNOWN") {
-        axios.post(APPS_SCRIPT_URL, { action: "appendRow", sheetName: "UnknownQuestions", rowData: [new Date().toLocaleString(), userMsg] }).catch(() => {});
+        axios.post(APPS_SCRIPT_URL, { action: "appendRow", sheetName: "FAQ", rowData: [new Date().toLocaleString(), userMsg] }).catch(() => {});
         sendFB(senderId, "দুঃখিত, আমি এটি জানি না। এটি রেকর্ড করা হয়েছে।");
     } else {
         sendFB(senderId, ai.answer);
