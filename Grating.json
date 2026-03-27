@@ -1,0 +1,98 @@
+[
+  {
+    "englishGreeting": "Good morning",
+    "englishReply": "Good morning. I hope you have a productive day.",
+    "banglaGreeting": "শুভ সকাল",
+    "banglaReply": "শুভ সকাল। আশা করি আপনার দিনটি ফলপ্রসূ হবে।"
+  },
+  {
+    "englishGreeting": "Good afternoon",
+    "englishReply": "Good afternoon. How are you today?",
+    "banglaGreeting": "শুভ অপরাহ্ন",
+    "banglaReply": "শুভ অপরাহ্ন। আজ আপনি কেমন আছেন?"
+  },
+  {
+    "englishGreeting": "Good evening",
+    "englishReply": "Good evening. It’s a pleasure to see you.",
+    "banglaGreeting": "শুভ সন্ধ্যা",
+    "banglaReply": "শুভ সন্ধ্যা। আপনাকে দেখে ভালো লাগলো।"
+  },
+  {
+    "englishGreeting": "Hello",
+    "englishReply": "Hello. How have you been?",
+    "banglaGreeting": "হ্যালো",
+    "banglaReply": "হ্যালো। আপনি কেমন আছেন?"
+  },
+  {
+    "englishGreeting": "How are you?",
+    "englishReply": "I am doing well, thank you. How about you?",
+    "banglaGreeting": "আপনি কেমন আছেন?",
+    "banglaReply": "আমি ভালো আছি, ধন্যবাদ। আপনি কেমন আছেন?"
+  },
+  {
+    "englishGreeting": "It’s nice to meet you",
+    "englishReply": "The pleasure is mine. I look forward to working with you.",
+    "banglaGreeting": "আপনার সাথে দেখা করে ভালো লাগলো",
+    "banglaReply": "আমারও ভালো লাগলো। আপনার সাথে কাজ করার অপেক্ষায় আছি।"
+  },
+  {
+    "englishGreeting": "See you soon",
+    "englishReply": "Certainly. I will see you at the scheduled time.",
+    "banglaGreeting": "শীঘ্রই দেখা হবে",
+    "banglaReply": "অবশ্যই। নির্ধারিত সময়ে দেখা হবে।"
+  },
+  {
+    "englishGreeting": "Assalamu Alaikum",
+    "englishReply": "Wa Alaikum Assalam. I hope you are doing well.",
+    "banglaGreeting": "আসসালামু আলাইকুম",
+    "banglaReply": "ওয়া আলাইকুম আসসালাম। আশা করি আপনি ভালো আছেন।"
+  },
+  {
+    "englishGreeting": "Good day",
+    "englishReply": "Good day. I hope everything is going well.",
+    "banglaGreeting": "শুভ দিন",
+    "banglaReply": "শুভ দিন। আশা করি সবকিছু ভালো চলছে।"
+  },
+  {
+    "englishGreeting": "Welcome aboard",
+    "englishReply": "Thank you, I’m excited to join.",
+    "banglaGreeting": "স্বাগতম",
+    "banglaReply": "ধন্যবাদ, যোগ দিতে পেরে আনন্দিত।"
+  },
+  {
+    "englishGreeting": "Congratulations",
+    "englishReply": "Congratulations on your achievement.",
+    "banglaGreeting": "অভিনন্দন",
+    "banglaReply": "আপনার সাফল্যের জন্য অভিনন্দন।"
+  },
+  {
+    "englishGreeting": "Hope you are doing well",
+    "englishReply": "Yes, thank you. How about you?",
+    "banglaGreeting": "আশা করি আপনি ভালো আছেন",
+    "banglaReply": "জি, ধন্যবাদ। আপনি কেমন আছেন?"
+  },
+  {
+    "englishGreeting": "I appreciate your time",
+    "englishReply": "It’s my pleasure.",
+    "banglaGreeting": "আপনার সময়ের জন্য কৃতজ্ঞ",
+    "banglaReply": "আমারও আনন্দ হয়েছে।"
+  },
+  {
+    "englishGreeting": "Assalamu Alaikum wa Rahmatullah",
+    "englishReply": "Wa Alaikum Assalam wa Rahmatullah.",
+    "banglaGreeting": "আসসালামু আলাইকুম ওয়া রহমাতুল্লাহ",
+    "banglaReply": "ওয়া আলাইকুম আসসালাম ওয়া রহমাতুল্লাহ।"
+  },
+  {
+    "englishGreeting": "Take care",
+    "englishReply": "Thank you, you too.",
+    "banglaGreeting": "নিজের যত্ন নিন",
+    "banglaReply": "ধন্যবাদ, আপনিও ভালো থাকুন।"
+  },
+  {
+    "englishGreeting": "Have a great day",
+    "englishReply": "Same to you.",
+    "banglaGreeting": "দিনটি ভালো কাটুক",
+    "banglaReply": "আপনারও দিনটি ভালো কাটুক।"
+  }
+]
