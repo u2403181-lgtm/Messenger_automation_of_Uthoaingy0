@@ -1,180 +1,137 @@
-require('dotenv').config();
-const express = require('express');
-const axios = require('axios');
-const fs = require('fs');
+require("dotenv").config();
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
+const axios = require("axios");
 
 const app = express();
 app.use(express.json());
 
-// ফাইল থেকে ডাটা লোড
-const officeData = JSON.parse(fs.readFileSync('ContactData.json', 'utf8'));
-const greetingData = JSON.parse(fs.readFileSync('Grating.json', 'utf8'));
+const { 
+    GROQ_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, 
+    PAGE_ACCESS_TOKEN, VERIFY_TOKEN, APPS_SCRIPT_URL 
+} = process.env;
 
-// --- হেল্পার ফাংশনসমূহ ---
+// ফাইল পাথ
+const CONTACT_JSON_PATH = path.join(__dirname, "ContactData.json");
+const GRATING_JSON_PATH = path.join(__dirname, "Grating.json");
 
-// ১. কাস্টম গ্রিটিং চেক (Grating.json)
-function getGreetingResponse(text) {
-    const lowText = text.toLowerCase();
-    const match = greetingData.find(g => 
-        lowText.includes(g.englishGreeting.toLowerCase()) || 
-        lowText.includes(g.banglaGreeting)
-    );
-    return match ? match.banglaReply : null;
-}
-
-// ২. নিকটস্থ অফিস খুঁজে বের করা (ContactData.json)
-function findOffice(location) {
-    if (!location) return null;
-    const search = location.toLowerCase();
-    return officeData.find(o => 
-        o.address.toLowerCase().includes(search) || 
-        o.city.toLowerCase().includes(search) ||
-        o.name.toLowerCase().includes(search)
-    );
-}
-
-// ৩. গুগল শিটে ডেটা পাঠানো (Apps Script-এ শুধুমাত্র entry/read)
-async function callGAS(payload) {
+// JSON রিড ফাংশন
+function readLocalJSON(filePath) {
     try {
-        const res = await axios.post(process.env.SCRIPT_URL, payload);
-        return res.data;
-    } catch (e) {
-        console.error("Apps Script Error:", e.message);
-    }
+        if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch (e) { return null; }
+    return null;
 }
 
-// ৪. AI (Gemini) প্রসেসিং
-async function askAI(text) {
-    const prompt = `You are an AI assistant for Quantum Method. Analyze the user message: "${text}"
+// --- AI ENGINE (Multi-Model with Data Extraction) ---
+async function getAIResponse(userMsg, context) {
+    const prompt = `You are a Quantum Method Assistant. 
+    Context: ${context}
     
-    Return ONLY a JSON object with this exact structure:
+    Task:
+    1. If user provides name/phone/location, extract it.
+    2. If info is missing, ask for it professionally in Bengali.
+    3. If it's a general question, answer using the FAQ context.
+    
+    Return ONLY a JSON string:
     {
-      "intent": "greeting" OR "info_sharing" OR "problem_desc" OR "qna",
-      "data": {"name": "...", "phone": "...", "location": "..."},
-      "answer": "Bengali answer or UNKNOWN"
-    }
-    
-    Rules:
-    - If user says Hi/Hello: intent "greeting"
-    - If user gives name/phone/location: intent "info_sharing"
-    - If user describes a problem: intent "problem_desc"
-    - Otherwise: intent "qna"`;
+      "intent": "info_sharing" | "qna" | "greeting",
+      "extracted_data": {"name": null, "phone": null, "location": null},
+      "answer": "Your Bengali response here"
+    }`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-    
+    // জেমিনি মডেল দিয়ে ট্রাই করা (Primary)
+    const model = "gemini-1.5-flash"; 
     try {
-        const res = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
-        let rawResponse = res.data.candidates[0].content.parts[0].text;
-        
-        // --- JSON Extracting Logic ---
-        // এটি টেক্সটের ভেতর থেকে { } এর মাঝের অংশটুকু খুঁজে বের করবে
-        const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            const cleanJson = JSON.parse(jsonMatch[0]);
-            return cleanJson;
-        }
-        throw new Error("No JSON found in AI response");
-
+        const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
+            contents: [{ parts: [{ text: prompt + `\n\nUser Message: ${userMsg}` }] }]
+        });
+        const rawText = res.data.candidates[0].content.parts[0].text;
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        return jsonMatch ? JSON.parse(jsonMatch[0]) : null;
     } catch (e) {
-        console.error("❌ AI Error:", e.message);
-        // টার্মিনালে চেক করার জন্য ফুল রেসপন্স প্রিন্ট করুন
-        if (e.response) console.log("Full Error Data:", JSON.stringify(e.response.data));
-        
-        return { intent: "qna", answer: "দুঃখিত, কারিগরি সমস্যার কারণে আমি বুঝতে পারছি না। দয়া করে আবার চেষ্টা করুন।" };
+        console.error("AI primary model failed, switching to fallback...");
+        return { intent: "qna", answer: "দুঃখিত, আমি এই মুহূর্তে প্রসেস করতে পারছি না।" };
     }
 }
 
-// --- মূল বোট লজিক ---
+// --- মূল মেসেজ প্রসেসিং ---
+app.post("/webhook", async (req, res) => {
+    res.status(200).send("EVENT_RECEIVED");
+    const event = req.body.entry?.[0]?.messaging?.[0];
+    const senderId = event?.sender?.id;
+    const userMsg = event?.message?.text;
 
-async function handleMessage(senderId, messageText) {
-    // ক. গ্রিটিং চেক
-    const customReply = getGreetingResponse(messageText);
-    if (customReply) {
-        const msg = `${customReply}\n\nWelcome! I am your Quantum Method Assistant. How can I help you today? Please share your full name, phone number, and present location.`;
-        return await sendMessenger(senderId, msg);
+    if (!userMsg || !senderId) return;
+
+    // ১. গ্রিটিং চেক (Local JSON থেকে)
+    const greetings = readLocalJSON(GRATING_JSON_PATH);
+    const matchedGreeting = greetings?.find(g => 
+        userMsg.toLowerCase().includes(g.englishGreeting?.toLowerCase()) || 
+        userMsg.includes(g.banglaGreeting)
+    );
+
+    if (matchedGreeting) {
+        const welcomeMsg = `${matchedGreeting.banglaReply}\n\nWelcome! I am your Quantum Method Assistant. How can I help you today? Please share your full name, phone number, and present location.`;
+        return await sendFBMessage(senderId, welcomeMsg);
     }
 
-    // খ. AI এনালাইসিস
-    const ai = await askAI(messageText);
+    // ২. AI প্রসেসিং এবং ডাটা এক্সট্রাকশন
+    const contactData = readLocalJSON(CONTACT_JSON_PATH);
+    const aiResult = await getAIResponse(userMsg, `Offices: ${JSON.stringify(contactData)}`);
 
-    // গ. ইনফো শেয়ারিং লজিক (Name, Phone, Location)
-    if (ai.intent === "info_sharing") {
-        const { name, phone, location } = ai.data;
+    if (aiResult.intent === "info_sharing") {
+        const { name, phone, location } = aiResult.extracted_data;
 
+        // ভ্যালিডেশন চেক
         if (!name || !phone) {
-            return await sendMessenger(senderId, "আপনার পূর্ণ নাম এবং ফোন নম্বর না দিলে আমাদের প্রতিনিধি আপনার সাথে যোগাযোগ করতে পারবে না। অনুগ্রহ করে নাম ও ফোন নম্বর দিন।");
+            return await sendFBMessage(senderId, "আপনার পূর্ণ নাম এবং ফোন নম্বর না দিলে আমাদের প্রতিনিধি আপনার সাথে যোগাযোগ করতে পারবে না। অনুগ্রহ করে তথ্যগুলো দিন।");
         }
 
-        // শিট থেকে ডেটা রিড করে ডুপ্লিকেট চেক (Processing in Node.js)
-        const sheetData = await callGAS({ action: "readSheet", sheetName: "Sheet1" });
-        let rowIndex = -1;
-        if (sheetData) {
-            rowIndex = sheetData.findIndex(row => row[1] == phone); // ২য় কলামে ফোন নম্বর
-        }
+        // ৩. গুগল শিটে ডাটা এন্ট্রি (শুধুমাত্র এন্ট্রি কমান্ড)
+        await axios.post(APPS_SCRIPT_URL, {
+            action: "appendRow",
+            sheetName: "Sheet1",
+            rowData: [name, phone, location, ""]
+        });
 
-        if (rowIndex !== -1) {
-            // ডুপ্লিকেট হলে আপডেট (GAS-এ শুধু updateCell কমান্ড)
-            await callGAS({ action: "updateCell", sheetName: "Sheet1", row: rowIndex + 1, col: 3, value: location });
-        } else {
-            // নতুন হলে অ্যাপেন্ড
-            await callGAS({ action: "appendRow", sheetName: "Sheet1", rowData: [name, phone, location, ""] });
-        }
-
-        // অফিস ইনফো
-        const office = findOffice(location);
-        let officeMsg = office 
-            ? `আপনার নিকটস্থ অফিস: ${office.name}\nঠিকানা: ${office.address}\nফোন: ${office.phone1}`
-            : "আপনার লোকেশনে আমাদের অফিস খুঁজে পাওয়া যায়নি, তবে প্রতিনিধি যোগাযোগ করবে।";
+        // ৪. নিকটস্থ অফিস খুঁজে বের করা
+        const office = contactData.find(o => location && (o.address.includes(location) || o.city.includes(location)));
+        let reply = office 
+            ? `নিকটস্থ অফিস: ${office.name}\nঠিকানা: ${office.address}\nফোন: ${office.phone1}`
+            : "আপনার লোকেশনে আমাদের কোনো অফিস পাওয়া যায়নি, তবে আমাদের প্রতিনিধি আপনার সাথে যোগাযোগ করবেন।";
         
-        return await sendMessenger(senderId, `${officeMsg}\n\nএবার আপনার সমস্যাটি সংক্ষেপে লিখুন।`);
+        return await sendFBMessage(senderId, `${reply}\n\nএবার আপনার কোনো সমস্যা থাকলে সংক্ষেপে লিখুন।`);
     }
 
-    // ঘ. প্রবলেম ডেসক্রিপশন আপডেট
-    if (ai.intent === "problem_desc") {
-        const sheetData = await callGAS({ action: "readSheet", sheetName: "Sheet1" });
-        // ফোন নম্বর বা সেন্ডার আইডি দিয়ে সঠিক রো খুঁজে আপডেট করা
-        // (এখানে প্র্যাকটিক্যালি ফোনের বদলে সেন্ডার আইডি ট্র্যাকিং বেটার, তবে আপনার শিট অনুযায়ী ফোন সার্চ করা হচ্ছে)
-        // ধরুন AI টেক্সট থেকে ফোন বা আইডি ডিটেক্ট করেছে:
-        await callGAS({ action: "appendRow", sheetName: "Sheet1", rowData: ["", "", "", messageText] }); // আপাতত নতুন রো বা আপডেট লজিক
-        return await sendMessenger(senderId, "ধন্যবাদ। আপনার কি আর কোনো প্রশ্ন আছে?");
-    }
-
-    // ঙ. Q&A এবং অজানা প্রশ্ন
-    if (ai.answer === "UNKNOWN") {
-        await callGAS({ action: "appendRow", sheetName: "UnknownQuestions", rowData: [new Date().toLocaleString(), messageText] });
-        return await sendMessenger(senderId, "দুঃখিত, আমি এই প্রশ্নের উত্তর জানি না। এটি রেকর্ড করা হয়েছে, প্রতিনিধি জানাবেন।");
+    // ৫. সাধারণ প্রশ্নোত্তর এবং অজানা প্রশ্ন
+    if (aiResult.answer.includes("UNKNOWN") || aiResult.answer === "") {
+        await axios.post(APPS_SCRIPT_URL, {
+            action: "appendRow",
+            sheetName: "UnknownQuestions",
+            rowData: [new Date().toLocaleString(), userMsg]
+        });
+        await sendFBMessage(senderId, "দুঃখিত, আমি এই প্রশ্নের সঠিক উত্তর জানি না। তবে এটি আমাদের সিস্টেমে জমা রাখা হয়েছে।");
     } else {
-        return await sendMessenger(senderId, ai.answer);
+        await sendFBMessage(senderId, aiResult.answer);
     }
-}
+});
 
-// --- মেসেঞ্জার এপিআই ---
-async function sendMessenger(id, text) {
+// --- হেল্পার ফাংশন ---
+async function sendFBMessage(senderId, text) {
     try {
-        await axios.post(`https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.PAGE_ACCESS_TOKEN}`, {
-            recipient: { id },
-            message: { text }
+        await axios.post(`https://graph.facebook.com/v19.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+            recipient: { id: senderId },
+            message: { text: text }
         });
-    } catch (e) { console.error("Send Error"); }
+    } catch (e) { console.error("FB Send Error"); }
 }
 
-// Webhook Setup
-app.get('/webhook', (req, res) => {
-    if (req.query['hub.verify_token'] === process.env.VERIFY_TOKEN) res.send(req.query['hub.challenge']);
-    else res.send('Error');
+app.get("/webhook", (req, res) => {
+    if (req.query["hub.verify_token"] === VERIFY_TOKEN) res.send(req.query["hub.challenge"]);
+    else res.sendStatus(403);
 });
 
-app.post('/webhook', (req, res) => {
-    const body = req.body;
-    if (body.object === 'page') {
-        body.entry.forEach(entry => {
-            const webhook_event = entry.messaging[0];
-            if (webhook_event.message && webhook_event.message.text) {
-                handleMessage(webhook_event.sender.id, webhook_event.message.text);
-            }
-        });
-        res.status(200).send('EVENT_RECEIVED');
-    } else res.sendStatus(404);
-});
-
-app.listen(process.env.PORT || 3000, () => console.log('Bot is running...'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Quantum Bot is live on port ${PORT}`));
