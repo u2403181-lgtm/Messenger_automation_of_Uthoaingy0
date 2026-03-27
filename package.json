@@ -20,6 +20,7 @@
   "homepage": "https://github.com/u2403181-lgtm/Messenger_automation_of_Uthoaingy0#readme",
   "dependencies": {
     "axios": "^1.13.6",
+    "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "fs": "^0.0.1-security"
   }
