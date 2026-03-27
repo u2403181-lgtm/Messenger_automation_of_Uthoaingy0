@@ -45,18 +45,43 @@ async function callGAS(payload) {
 
 // ৪. AI (Gemini) প্রসেসিং
 async function askAI(text) {
-    const prompt = `You are an AI assistant for Quantum Method. Analyze the message: "${text}"
-    - If user provides personal info (name/phone/location), set intent: "info_sharing".
-    - If user describes a problem/seeking help, set intent: "problem_desc".
-    - For general Q&A, answer in Bengali. If you don't know, return answer: "UNKNOWN".
-    Return ONLY JSON: {"intent": "...", "data": {"name": "..", "phone": "..", "location": ".."}, "answer": ".."}`;
+    const prompt = `You are an AI assistant for Quantum Method. Analyze the user message: "${text}"
+    
+    Return ONLY a JSON object with this exact structure:
+    {
+      "intent": "greeting" OR "info_sharing" OR "problem_desc" OR "qna",
+      "data": {"name": "...", "phone": "...", "location": "..."},
+      "answer": "Bengali answer or UNKNOWN"
+    }
+    
+    Rules:
+    - If user says Hi/Hello: intent "greeting"
+    - If user gives name/phone/location: intent "info_sharing"
+    - If user describes a problem: intent "problem_desc"
+    - Otherwise: intent "qna"`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/Gemini_1.5_Pro:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    
     try {
         const res = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
-        const cleanJson = res.data.candidates[0].content.parts[0].text.replace(/```json|```/g, "");
-        return JSON.parse(cleanJson);
-    } catch (e) { return { intent: "qna", answer: "দুঃখিত, আমি বুঝতে পারছি না।" }; }
+        let rawResponse = res.data.candidates[0].content.parts[0].text;
+        
+        // --- JSON Extracting Logic ---
+        // এটি টেক্সটের ভেতর থেকে { } এর মাঝের অংশটুকু খুঁজে বের করবে
+        const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            const cleanJson = JSON.parse(jsonMatch[0]);
+            return cleanJson;
+        }
+        throw new Error("No JSON found in AI response");
+
+    } catch (e) {
+        console.error("❌ AI Error:", e.message);
+        // টার্মিনালে চেক করার জন্য ফুল রেসপন্স প্রিন্ট করুন
+        if (e.response) console.log("Full Error Data:", JSON.stringify(e.response.data));
+        
+        return { intent: "qna", answer: "দুঃখিত, কারিগরি সমস্যার কারণে আমি বুঝতে পারছি না। দয়া করে আবার চেষ্টা করুন।" };
+    }
 }
 
 // --- মূল বোট লজিক ---
