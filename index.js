@@ -96,7 +96,8 @@ async function askAI(userMsg) {
     } catch (e) { return null; }
 }
 
-// ৫. ওয়েবহুক হ্যান্ডলার (Scalable)
+// ৫.ওয়েবহুক হ্যান্ডলার (Scalable)
+
 app.post("/webhook", async (req, res) => {
     res.status(200).send("EVENT_RECEIVED");
     
